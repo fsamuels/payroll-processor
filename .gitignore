@@ -1,0 +1,14 @@
+# Compiled COBOL output
+*.o
+*.so
+*.dylib
+
+# cobc executables have no extension; keep them in bin/ or ignore by name
+/bin/
+payroll-v1
+payroll-report
+tax-calc
+hello
+
+# macOS
+.DS_Store
