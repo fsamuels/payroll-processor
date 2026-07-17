@@ -5,7 +5,16 @@ stage lands.
 
 ## M0 — Repo + toolchain setup
 
-_(pending)_
+- GnuCOBOL 3.2.0 installed via `brew install gnucobol` (pulls berkeley-db,
+  gmp, json-c as dependencies). Installed cleanly on Apple Silicon.
+- `src/hello.cob` is a minimal fixed-format program: sequence numbers in
+  cols 1–6, `*` in col 7 for comments, division headers in Area A (col 8),
+  statements in Area B (col 12+).
+- `cobc -xj src/hello.cob` compiles and runs in one step. It leaves the
+  compiled executable (`hello`, no extension) in the working directory —
+  covered by `.gitignore`.
+- Compiled with zero warnings; no format or dialect flags needed for
+  fixed-format source, since fixed is GnuCOBOL's default.
 
 ## Stage 1 — Single flat-file program
 
