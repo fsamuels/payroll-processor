@@ -7,6 +7,11 @@
 000700* writes a formatted report with one line per employee plus a
 000800* total-gross line and an employee-count line.
 000900*
+000950* M2 Stage 2: the employee record layout below moved out to
+000960* copybooks/employee-record.cpy, shared with the new
+000970* payroll-report.cob via COPY - see FD EMPLOYEE-FILE below and
+000980* the copybook itself for what changed and why.
+000990*
       * NEW TO COBOL? A quick orientation on the source format used
       * throughout this file (this is "fixed-format" COBOL, the
       * traditional punch-card-derived layout GnuCOBOL defaults to):
@@ -54,28 +59,18 @@
       *   SECTION              accumulators, flags, and the
       *                        formatted lines built for output
 001900 FILE SECTION.
-      * FD = File Description. It's followed by a single 01-level
-      * record that lays out that file's record, byte by byte via
-      * PICTURE ("PIC") clauses. This record layout IS the file
-      * format on disk for a fixed-width file like this one - there
-      * are no delimiters between EMP-ID, EMP-NAME, etc.; the
-      * compiler knows where one field ends and the next begins
-      * purely from the PIC widths below.
+      * FD = File Description, naming the file whose record layout
+      * follows. Rather than spelling out the 05-level fields here,
+      * this FD's record comes from a COPY statement, which pulls in
+      * the exact text of copybooks/employee-record.cpy at compile
+      * time (before the compiler does anything else with the
+      * source) - the effect is identical to typing those 05-level
+      * PIC 9/X/V fields directly here, just maintained in one shared
+      * file. See the copybook itself for the field-by-field layout.
+      * Compiling now needs `-I copybooks` on the cobc command line
+      * so it can find employee-record.cpy - see README.md.
 002000 FD EMPLOYEE-FILE.
-002100 01 EMPLOYEE-RECORD.
-      *     PIC 9    one numeric digit (0-9), unsigned
-      *     PIC X    one alphanumeric character, any byte
-      *     PIC V    an IMPLIED decimal point - lines up where the
-      *              decimal belongs but takes up zero bytes on disk.
-      *              EMP-HOURS PIC 9(3)V99 is 5 bytes wide, and
-      *              40.00 hours is stored as the literal digits
-      *              "04000", not "040.00". Get the zero-padding
-      *              wrong and every field after it in the record
-      *              shifts out of alignment.
-002200     05 EMP-ID              PIC 9(4).
-002300     05 EMP-NAME            PIC X(20).
-002400     05 EMP-HOURS           PIC 9(3)V99.
-002500     05 EMP-RATE            PIC 9(3)V99.
+002100     COPY EMPLOYEE-RECORD.
 002600*
       * REPORT-FILE's record is declared as one flat, unstructured
       * PIC X(54) buffer, unlike EMPLOYEE-RECORD above. That's
