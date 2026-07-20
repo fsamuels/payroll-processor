@@ -47,7 +47,39 @@ stage lands.
 
 ## Stage 2 — Extract a copybook
 
-_(not started)_
+- `copybooks/employee-record.cpy` holds just the `01 EMPLOYEE-RECORD`
+  entry (05-level fields, no `FD`) — the `FD EMPLOYEE-FILE.` line stays in
+  each program, since the file-name it's tied to is program-specific even
+  when, as here, both programs happen to use the same one.
+- `COPY` is pure textual substitution at compile time, applied before the
+  compiler does anything else with the source — so the `.cpy` file has to
+  follow the same fixed-format column rules (sequence numbers, indicator
+  area, Area A/B) as the `.cob` file it's inserted into.
+- Compiling either program now needs `-I copybooks` so `cobc` can resolve
+  `COPY EMPLOYEE-RECORD.` to `copybooks/employee-record.cpy`. Omitting the
+  flag fails at compile time with a clear "copybook not found" error, not
+  a silent problem.
+- After extracting the copybook, recompiled `payroll-v1.cob` and diffed
+  `data/payroll-report.out` against the pre-extraction output — byte
+  identical, confirming the refactor changed nothing observable.
+- `payroll-report.cob` COPYs the same layout to build a paginated summary
+  report. `WRITE ... AFTER ADVANCING PAGE` is COBOL's page-break
+  mechanism — confirmed with a throwaway test program that it inserts a
+  literal form-feed control character (hex `0C`, `\f`) into the output
+  immediately before that WRITE's line, visible with `od -c`. The first
+  page's header intentionally skips `ADVANCING PAGE` (plain `WRITE`)
+  since a leading form-feed before any content would be a stray control
+  character with nothing to page past.
+- `WS-LINES-PER-PAGE` is set to 2 (a real report might use 40-60) purely
+  so the existing 4-employee sample data exercises an actual page break
+  without needing bigger test data — keeps output hand-verifiable per
+  this project's convention of small test data (see M1 notes above).
+  With 2 employees/page, `data/payroll-summary.out` comes out as two
+  pages (1001/1002, then 1003/1004) with grand totals appended after the
+  last page, matching Stage 1's total-gross of 3,871.50.
+- Compile: `cobc -x -I copybooks -o payroll-report src/payroll-report.cob`
+  — zero warnings with `-Wall`. Run as `./payroll-report` from the repo
+  root (relative `ASSIGN` paths).
 
 ## Stage 3 — Called subprogram
 
