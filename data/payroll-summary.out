@@ -1,0 +1,12 @@
+PAYROLL SUMMARY REPORT - STAGE 2 PAGE  1
+========================
+    ID  NAME                   HOURS    RATE     GROSS
+  1001  ALICE ANDERSON         40.00   25.00  1,000.00
+  1002  BOB BAKER              38.00   30.50  1,159.00
+PAYROLL SUMMARY REPORT - STAGE 2 PAGE  2========================
+    ID  NAME                   HOURS    RATE     GROSS
+  1003  CAROL CHEN             45.00   18.50    832.50
+  1004  DAVID DIAZ             40.00   22.00    880.00
+========================
+  TOTAL GROSS PAY:   3,871.50
+  EMPLOYEE COUNT:     4
