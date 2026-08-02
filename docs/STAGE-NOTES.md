@@ -83,7 +83,66 @@ stage lands.
 
 ## Stage 3 — Called subprogram
 
-_(not started)_
+- `src/tax-calc.cob` is a subprogram: no `FILE SECTION`, no files of its
+  own, just a `LINKAGE SECTION` (`LS-GROSS-PAY` in; `LS-TAX-AMOUNT`,
+  `LS-NET-PAY` out) and ends each invocation with `GOBACK` instead of
+  `STOP RUN` — `STOP RUN` would end the whole caller's process, not just
+  return from the one `CALL`.
+- `src/payroll-net.cob` is a new, independent Stage 3 driver program
+  (rather than a change to `payroll-v1.cob`) — same one-artifact-per-stage
+  approach Stage 2 used, and it means Stage 1/2's byte-diff-verified
+  output stays untouched. It `COPY`s the same `employee-record.cpy`
+  layout, computes gross pay identically to `payroll-v1.cob`, then
+  `CALL "TAX-CALC" USING WS-GROSS-PAY WS-TAX-AMOUNT WS-NET-PAY` once per
+  employee.
+- COBOL `CALL` links parameters **positionally**, by matching storage
+  layout, not by name — `WS-GROSS-PAY`/`WS-TAX-AMOUNT`/`WS-NET-PAY` in
+  `payroll-net.cob` must appear in the same order and have the same
+  `PICTURE` (`9(5)V99`, all three) as `LS-GROSS-PAY`/`LS-TAX-AMOUNT`/
+  `LS-NET-PAY` in `tax-calc.cob`'s `PROCEDURE DIVISION USING`. Nothing
+  checks this by name at compile time; a mismatched order or PICTURE
+  would silently misinterpret the bytes on the other side.
+- Three fictional, hand-verifiable tax brackets, implemented as hardcoded
+  `IF`/`ELSE` (not a table): gross `<= 850.00` → 10%, `<= 1050.00` → 15%,
+  otherwise → 20%. Thresholds were chosen so all three brackets are
+  actually exercised by the existing 4-employee sample data (rather than,
+  say, a boundary that happens to leave one bracket untested):
+  - 1003 CAROL CHEN: gross `832.50` → 10% → tax `83.25`, net `749.25`
+  - 1004 DAVID DIAZ: gross `880.00` → 15% → tax `132.00`, net `748.00`
+  - 1001 ALICE ANDERSON: gross `1,000.00` → 15% → tax `150.00`, net `850.00`
+  - 1002 BOB BAKER: gross `1,159.00` → 20% → tax `231.80`, net `927.20`
+  - Totals: tax withheld `597.05`, net pay `3,274.45` — checked against
+    Stage 1's total gross of `3,871.50` (`3,871.50 - 597.05 = 3,274.45`).
+- `COMPUTE ... ROUNDED` is used for the tax amount (e.g. `832.50 * 0.10 =
+  83.250` rounds to `83.25`) — without `ROUNDED`, COBOL truncates instead
+  of rounding, which would only differ here at the third decimal place
+  but is worth being deliberate about for any bracket/rate combination
+  that lands exactly on a rounding boundary.
+- This hardcoded `IF`/`ELSE` is deliberately the "before" picture for
+  Stage 4, which plans to replace it with an `OCCURS` table and
+  `SEARCH`/`SEARCH ALL` (see roadmap.md) — not a shortcut to clean up
+  later, but the intended point of comparison between the two idioms.
+- **Two programs compiled together, not a dynamically-loaded module.**
+  The README originally anticipated `cobc -m src/tax-calc.cob` (a
+  separately compiled `.so` module, dynamically loaded at runtime by
+  name). In practice, giving both source files to `cobc -x` in one
+  invocation (`cobc -x -I copybooks -o payroll-net src/payroll-net.cob
+  src/tax-calc.cob`) statically links the `CALL` target into a single
+  executable — simpler, and it avoids any runtime module-search-path
+  configuration (`COB_LIBRARY_PATH` and friends) entirely. No separate
+  `tax-calc` binary or `.so` file is produced.
+- **Copybook `COPY` resolution turned out to be case-sensitive** on the
+  Linux GnuCOBOL install used to verify this stage compiles: `COPY
+  EMPLOYEE-RECORD.` failed to resolve to `employee-record.cpy` with `-I
+  copybooks` until a same-case `EMPLOYEE-RECORD.cpy` existed alongside it.
+  This project's stated platform is macOS, whose default filesystem is
+  case-insensitive, so `payroll-v1.cob`/`payroll-report.cob` have never
+  hit this — it only surfaced here because Stage 3 verification happened
+  on Linux. No repository change was made for it (see architecture.md's
+  Known architectural debt); noted in case a Linux CI job is ever added.
+- Compile: `cobc -x -I copybooks -o payroll-net src/payroll-net.cob
+  src/tax-calc.cob` — zero warnings with `-Wall`. Run as `./payroll-net`
+  from the repo root (relative `ASSIGN` paths, same as Stages 1–2).
 
 ## Stage 4 — Indexed file + table lookup (stretch)
 

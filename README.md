@@ -31,8 +31,10 @@ logic does not match real tax law.
   shares the Stage 1 record layout via a copybook (`copybooks/`) and
   produces a paginated summary report (repeating headers, page breaks via
   `WRITE ... AFTER ADVANCING PAGE`, grand totals).
-- **Stage 3 (planned)** — tax calculation split into a called subprogram
-  (`CALL ... USING`, `LINKAGE SECTION`).
+- **Stage 3 — `payroll-net.cob` + `tax-calc.cob`**: a third independent
+  program that computes gross pay exactly as Stage 1 does, then `CALL`s a
+  separate subprogram (`tax-calc.cob`) to withhold tax and compute net pay
+  via a `LINKAGE SECTION` parameter list, and writes a net-pay report.
 - **Stage 4 (stretch, planned)** — indexed employee file + `OCCURS`/`SEARCH`
   tax-bracket table lookup.
 
@@ -76,6 +78,12 @@ cobc -x -I copybooks -o payroll-v1     src/payroll-v1.cob
 # Stage 2
 cobc -x -I copybooks -o payroll-report src/payroll-report.cob
 ./payroll-report
+
+# Stage 3 — driver program AND subprogram are given to cobc together,
+# so the CALL "TAX-CALC" in payroll-net.cob is resolved and statically
+# linked into one executable (no separate tax-calc binary is produced)
+cobc -x -I copybooks -o payroll-net src/payroll-net.cob src/tax-calc.cob
+./payroll-net
 ```
 
 Other `cobc` invocations used in this project:
@@ -83,14 +91,10 @@ Other `cobc` invocations used in this project:
 ```bash
 # Compile and run in one step (used for the M0 toolchain check)
 cobc -xj src/hello.cob
-
-# Compile a subprogram module (not a standalone executable) — for
-# Stage 3's tax-calc.cob once it exists; not yet implemented
-cobc -m src/tax-calc.cob
 ```
 
 Compiled executables have no file extension and are `.gitignore`d
-(`payroll-v1`, `payroll-report`, `tax-calc`, `hello`) — they're build
+(`payroll-v1`, `payroll-report`, `payroll-net`, `hello`) — they're build
 artifacts, not checked in.
 
 ## Testing instructions
@@ -102,7 +106,11 @@ design (see [docs/architecture.md](docs/architecture.md#design-decisions)):
    (currently 4 employees) so the expected gross pay, running totals, and
    employee count can be checked by hand against the program's output.
    Current known-good total: `1,000.00 + 1,159.00 + 832.50 + 880.00 =
-   3,871.50`.
+   3,871.50`. Stage 3's tax withholding is likewise hand-verifiable per
+   employee against the fictional brackets in
+   [docs/STAGE-NOTES.md](docs/STAGE-NOTES.md#stage-3--called-subprogram):
+   total tax withheld `597.05`, total net pay `3,274.45` (`3,871.50 -
+   597.05`).
 2. **Byte-diff after refactors.** When a change is meant to be
    behavior-preserving (e.g. Stage 2 extracting the copybook out of
    `payroll-v1.cob`), the `.out` file is diffed byte-for-byte against the
@@ -111,7 +119,8 @@ design (see [docs/architecture.md](docs/architecture.md#design-decisions)):
    and is expected to produce zero warnings.
 
 Sample outputs are checked into `data/` (`payroll-report.out`,
-`payroll-summary.out`) as the current known-good baseline.
+`payroll-summary.out`, `payroll-net-report.out`) as the current known-good
+baseline.
 
 ## Important configuration
 
@@ -123,6 +132,13 @@ Sample outputs are checked into `data/` (`payroll-report.out`,
   is a compile error, not a warning.
 - File `ASSIGN` paths are relative to the current working directory, not
   the source file — always run compiled executables from the repo root.
+- `COPY` resolves the copybook name against the filesystem using the exact
+  case written in the `COPY` statement. On macOS's default case-insensitive
+  filesystem (this project's stated platform) `COPY EMPLOYEE-RECORD.`
+  finds `employee-record.cpy` without issue; on a case-sensitive filesystem
+  (e.g. Linux) the same statement fails to resolve unless the filename's
+  case matches. Not a bug to fix here — just a portability gotcha to know
+  about if this project is ever built somewhere other than macOS.
 
 ## Repository structure
 
