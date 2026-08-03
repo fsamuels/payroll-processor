@@ -1,37 +1,45 @@
 # Roadmap and milestones
 
-**Current milestone: M3** (Stage 3 — called subprogram). M0–M2 are done.
+**Current milestone: M4** (Stage 4, stretch — go/no-go not yet decided).
+M0–M3 are done.
 
 | # | Milestone | Depends on | Exit criteria | Status |
 |---|-----------|-----------|----------------|--------|
 | M0 | Repo + toolchain setup | — | `cobc -xj` compiles a hello-world; committed to `main` | ✅ done |
 | M1 | Stage 1 complete | M0 | payroll-v1 compiles, runs against sample data, output verified by hand | ✅ done |
 | M2 | Stage 2 complete | M1 | copybook extracted, both programs compile and match Stage 1 output | ✅ done |
-| M3 | Stage 3 complete | M2 | subprogram CALL works, net pay matches manual calculation | ⏳ next |
-| M4 | Stage 4 (stretch) | M3 | indexed file + table lookup working, decide go/no-go before starting | not started |
+| M3 | Stage 3 complete | M2 | subprogram CALL works, net pay matches manual calculation | ✅ done |
+| M4 | Stage 4 (stretch) | M3 | indexed file + table lookup working, decide go/no-go before starting | ⏳ next (go/no-go pending) |
 | M5 | Documentation pass | M1–M4 | README covers each stage, what it demonstrates, how to run it | ongoing (kept current after each stage; see [current-status.md](current-status.md)) |
 
 Stage details live in [architecture.md](architecture.md).
 
-## Short-term goals (M3)
+## Recently completed (M3)
 
-- Design the `CALL ... USING` parameter list between the main program and
-  `tax-calc.cob` (gross pay in; net pay and/or tax withheld out).
-- Write `tax-calc.cob` with a `LINKAGE SECTION` matching that contract.
-- Decide fictional tax-bracket logic (simple, hand-verifiable — consistent
-  with the project's non-goal of real tax accuracy).
-- Wire the call into `payroll-v1.cob` (or a new Stage 3 driver program —
-  TBD when Stage 3 work starts), verify net pay by hand.
-- Document the calling convention in README/STAGE-NOTES, same pattern used
-  for Stages 1–2.
+- Designed the `CALL ... USING` parameter list between a new Stage 3 driver
+  program and `tax-calc.cob`: gross pay in, tax withheld and net pay out,
+  all `PIC 9(5)V99`, linked positionally (see
+  [architecture.md](architecture.md#stage-3--called-subprogram--done)).
+- Wrote `src/tax-calc.cob` with a `LINKAGE SECTION` matching that contract;
+  three fictional, hand-verifiable tax brackets (10%/15%/20%), deliberately
+  hardcoded `IF`/`ELSE` rather than a table — Stage 4 plans to replace this
+  exact logic with `SEARCH`/`SEARCH ALL` over an `OCCURS` table, so the
+  "before" picture needed to stay simple.
+- Added `src/payroll-net.cob` as a new, independent Stage 3 driver program
+  (rather than modifying `payroll-v1.cob`) — consistent with the project's
+  one-artifact-per-stage approach and keeps Stage 1/2's byte-diff-verified
+  output untouched.
+- Verified net pay by hand for all 4 employees; documented the calling
+  convention and a copybook case-sensitivity gotcha in README/STAGE-NOTES.
 
 ## Medium-term goals (M4, stretch)
 
-- After M3 lands: explicit go/no-go decision on Stage 4, since it's
-  marked optional/stretch in the architecture plan.
+- M3 has landed — explicit go/no-go decision on Stage 4 is the immediate
+  next step, since it's marked optional/stretch in the architecture plan.
 - If go: convert `data/employees.dat` to `ORGANIZATION IS INDEXED` keyed
   by employee ID, add an `OCCURS`-based tax-bracket table, replace
-  hardcoded tax IF/ELSE with `SEARCH`/`SEARCH ALL`.
+  `tax-calc.cob`'s hardcoded `IF`/`ELSE` tax brackets with
+  `SEARCH`/`SEARCH ALL`.
 - Migration notes explaining sequential-vs-indexed tradeoffs.
 
 ## Long-term goals
@@ -49,7 +57,10 @@ Stage details live in [architecture.md](architecture.md).
 - No automated test suite (see architecture.md's Known architectural
   debt) — acceptable at current scale, revisit if test data ever grows
   beyond hand-verifiable size.
-- No CI compile-check on push/PR.
+- No CI compile-check on push/PR. If one is ever added, note that GitHub
+  Actions runners are Linux (case-sensitive filesystem) — see the `COPY`
+  case-sensitivity gotcha in README/STAGE-NOTES, which this macOS-only
+  project hasn't needed to work around so far.
 
 ## Nice-to-have enhancements
 

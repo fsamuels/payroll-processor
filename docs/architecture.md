@@ -17,7 +17,8 @@ against test data. Each stage is its own PR.
 | `src/payroll-v1.cob` | Stage 1. Reads `data/employees.dat`, computes gross pay, writes `data/payroll-report.out` (single-block report: headers, one line per employee, totals). |
 | `src/payroll-report.cob` | Stage 2. Reads the same `data/employees.dat`, writes `data/payroll-summary.out` — a paginated summary report (repeating page headers, capped detail lines per page, page breaks, grand totals). Independent executable from `payroll-v1`; shares only the record layout. |
 | `copybooks/employee-record.cpy` | Shared `01 EMPLOYEE-RECORD` layout (`EMP-ID`, `EMP-NAME`, `EMP-HOURS`, `EMP-RATE`). `COPY`d into both `payroll-v1.cob` and `payroll-report.cob` so the two programs cannot drift apart on the file format. |
-| `src/tax-calc.cob` *(Stage 3, not yet implemented)* | Planned subprogram: gross pay in, net pay / tax withheld out via `CALL ... USING`. |
+| `src/tax-calc.cob` | Stage 3 subprogram: gross pay in, tax withheld and net pay out via `CALL ... USING` / `LINKAGE SECTION`. Three fictional, hardcoded `IF`/`ELSE` tax brackets. No `FILE SECTION` of its own — its only I/O is the parameter list. |
+| `src/payroll-net.cob` | Stage 3 driver. Reads `data/employees.dat`, computes gross pay same as `payroll-v1.cob`, `CALL`s `tax-calc.cob` per employee, writes `data/payroll-net-report.out` (gross/tax/net detail lines plus grand totals). Independent executable, compiled together with `tax-calc.cob` into one binary (`cobc -x ... payroll-net.cob tax-calc.cob`). |
 | `data/employees.dat` | Sample/test employee master file — fixed-width, currently 4 hand-written records. |
 
 ## Data flow
@@ -25,23 +26,33 @@ against test data. Each stage is its own PR.
 ```
 data/employees.dat  (fixed-width sequential file)
         │
-        ├─▶ payroll-v1.cob      ──▶ data/payroll-report.out    (Stage 1: flat report)
+        ├─▶ payroll-v1.cob      ──▶ data/payroll-report.out      (Stage 1: flat report)
         │
-        └─▶ payroll-report.cob ──▶ data/payroll-summary.out   (Stage 2: paginated report)
-                 ▲
+        ├─▶ payroll-report.cob ──▶ data/payroll-summary.out     (Stage 2: paginated report)
+        │
+        └─▶ payroll-net.cob    ──▶ data/payroll-net-report.out  (Stage 3: gross/tax/net report)
+                 ▲                       │
+                 │                       └─▶ CALL "TAX-CALC" (in-process,
+                 │                            same executable — see below)
                  └── COPY EMPLOYEE-RECORD.  (copybooks/employee-record.cpy,
-                      also COPYd into payroll-v1.cob)
+                      also COPYd into payroll-v1.cob and payroll-report.cob)
 ```
 
-Both programs open `EMPLOYEE-FILE` read-only, loop record-by-record with a
-priming read + `PERFORM UNTIL` end-of-file, and open their own
+All three programs open `EMPLOYEE-FILE` read-only, loop record-by-record
+with a priming read + `PERFORM UNTIL` end-of-file, and open their own
 `REPORT-FILE` write-only/output. There is no shared runtime state between
-the two programs — the only thing shared is the compile-time copybook
-text.
+them — the only thing shared at compile time is the copybook text (and,
+for Stage 3, the `tax-calc.cob` source file linked into `payroll-net`'s
+executable).
 
-Planned (Stage 3): `payroll-v1.cob` (or a successor) will `CALL` into
-`tax-calc.cob`, passing gross pay in and receiving net pay / tax withheld
-back via `LINKAGE SECTION` parameters, still within a single process.
+`payroll-net.cob` `CALL`s `tax-calc.cob` once per employee, passing gross
+pay in and receiving tax withheld and net pay back via `LINKAGE SECTION`
+parameters (`WS-GROSS-PAY`/`WS-TAX-AMOUNT`/`WS-NET-PAY` in the caller,
+matching `LS-GROSS-PAY`/`LS-TAX-AMOUNT`/`LS-NET-PAY` in the subprogram).
+Both programs are compiled together in one `cobc -x` invocation
+(`src/payroll-net.cob src/tax-calc.cob`), which statically links the CALL
+target into a single executable — no dynamically-loaded `.so` module and
+no separate `tax-calc` binary.
 
 ## External integrations
 
@@ -100,13 +111,21 @@ compile-check gets added.
   above.
 - **No CI.** Nothing currently runs `cobc` on push/PR to catch a broken
   compile automatically.
-- **Stage 3 and Stage 4 are unstarted** — `payroll-v1.cob` still computes
-  gross pay only, with no tax/net-pay logic. Stage 4 (indexed file +
-  table lookup) is explicitly optional/stretch; go/no-go decision
-  deferred until Stage 3 lands (see roadmap).
-- **Fictional tax logic is a stated non-goal**, not a gap to close — do
-  not treat the eventual Stage 3 tax brackets as needing real-world
-  accuracy.
+- **Stage 4 is unstarted** — the tax brackets in `tax-calc.cob` are still
+  three hardcoded `IF`/`ELSE` comparisons, not a table. Stage 4 (indexed
+  file + table lookup) is explicitly optional/stretch; go/no-go decision
+  is the immediate next step (see roadmap).
+- **Fictional tax logic is a stated non-goal**, not a gap to close — the
+  three brackets in `tax-calc.cob` (10%/15%/20%, thresholds chosen to
+  exercise all three against the existing 4-employee sample data) do not
+  need real-world accuracy.
+- **`COPY` copybook-name resolution is case-sensitive on Linux, matching
+  the exact case of the `COPY` operand.** This project targets macOS
+  (case-insensitive filesystem by default), where `COPY EMPLOYEE-RECORD.`
+  resolving to `employee-record.cpy` has never been an issue. Discovered
+  while verifying Stage 3 compiles on a Linux GnuCOBOL install — noted
+  here since it would surface as a build failure if a Linux CI job (see
+  roadmap's nice-to-haves) were ever added without accounting for it.
 
 ## Stage-by-stage plan
 
@@ -145,11 +164,14 @@ Demonstrates:
 **Deliverable**: `employee-record.cpy`, updated `payroll-v1.cob`,
 `payroll-report.cob`.
 
-### Stage 3 — Called subprogram (not started)
+### Stage 3 — Called subprogram ✅ done
 
-Move tax calculation out of the main program into its own COBOL subprogram.
-Main program CALLs it, passing gross pay in and receiving net pay
-(and/or tax withheld) out via a parameter list.
+Tax calculation lives in its own COBOL subprogram, `tax-calc.cob`. A new
+driver program, `payroll-net.cob`, CALLs it once per employee, passing
+gross pay in and receiving tax withheld and net pay out via a parameter
+list — a new, independent program rather than a modification of
+`payroll-v1.cob`, consistent with this project's one-artifact-per-stage
+approach (see Design decisions below).
 
 Demonstrates:
 
@@ -157,9 +179,11 @@ Demonstrates:
 - LINKAGE SECTION in the subprogram
 - Separation of business logic into distinct compilation units
 - PROCEDURE DIVISION USING in the called program
+- GOBACK (subprogram return) vs. STOP RUN (program termination)
 
-**Deliverable**: `tax-calc.cob` (subprogram), updated main program,
-documented calling convention.
+**Deliverable**: `tax-calc.cob` (subprogram), `payroll-net.cob` (driver),
+documented calling convention (see
+[data-flow](#data-flow) above and STAGE-NOTES.md).
 
 ### Stage 4 (optional/stretch) — Indexed file + table lookup (not started)
 
