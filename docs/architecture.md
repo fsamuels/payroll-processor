@@ -17,9 +17,11 @@ against test data. Each stage is its own PR.
 | `src/payroll-v1.cob` | Stage 1. Reads `data/employees.dat`, computes gross pay, writes `data/payroll-report.out` (single-block report: headers, one line per employee, totals). |
 | `src/payroll-report.cob` | Stage 2. Reads the same `data/employees.dat`, writes `data/payroll-summary.out` — a paginated summary report (repeating page headers, capped detail lines per page, page breaks, grand totals). Independent executable from `payroll-v1`; shares only the record layout. |
 | `copybooks/employee-record.cpy` | Shared `01 EMPLOYEE-RECORD` layout (`EMP-ID`, `EMP-NAME`, `EMP-HOURS`, `EMP-RATE`). `COPY`d into both `payroll-v1.cob` and `payroll-report.cob` so the two programs cannot drift apart on the file format. |
-| `src/tax-calc.cob` | Stage 3 subprogram: gross pay in, tax withheld and net pay out via `CALL ... USING` / `LINKAGE SECTION`. Three fictional, hardcoded `IF`/`ELSE` tax brackets. No `FILE SECTION` of its own — its only I/O is the parameter list. |
+| `src/tax-calc.cob` | Stage 3 subprogram: gross pay in, tax withheld and net pay out via `CALL ... USING` / `LINKAGE SECTION`. Three fictional tax brackets. No `FILE SECTION` of its own — its only I/O is the parameter list. Stage 4 replaced the original hardcoded `IF`/`ELSE` bracket logic with an `OCCURS` table walked by `SEARCH`, same brackets, byte-identical output — see below. |
 | `src/payroll-net.cob` | Stage 3 driver. Reads `data/employees.dat`, computes gross pay same as `payroll-v1.cob`, `CALL`s `tax-calc.cob` per employee, writes `data/payroll-net-report.out` (gross/tax/net detail lines plus grand totals). Independent executable, compiled together with `tax-calc.cob` into one binary (`cobc -x ... payroll-net.cob tax-calc.cob`). |
-| `data/employees.dat` | Sample/test employee master file — fixed-width, currently 4 hand-written records. |
+| `data/employees.dat` | Sample/test employee master file — fixed-width, currently 4 hand-written records. `LINE SEQUENTIAL`; unchanged since Stage 1, still read by Stages 1–3. |
+| `src/build-employee-index.cob` | Stage 4 one-time conversion utility. Reads `data/employees.dat` and writes `data/employees-indexed.dat`, an `ORGANIZATION IS INDEXED` file keyed by `EMP-ID`. Generated binary artifact, not checked in (`.gitignore`d) — rerun whenever `data/employees.dat` changes. |
+| `src/payroll-indexed.cob` | Stage 4 driver. Reads `data/employees-indexed.dat` (`ACCESS MODE IS DYNAMIC`): a random `READ ... KEY IS` lookup for one employee, then a `START` + sequential `READ NEXT` pass over all records. `CALL`s the same `tax-calc.cob` subprogram as Stage 3, writes `data/payroll-indexed-report.out`. Independent executable, compiled together with `tax-calc.cob`. |
 
 ## Data flow
 
@@ -30,20 +32,26 @@ data/employees.dat  (fixed-width sequential file)
         │
         ├─▶ payroll-report.cob ──▶ data/payroll-summary.out     (Stage 2: paginated report)
         │
-        └─▶ payroll-net.cob    ──▶ data/payroll-net-report.out  (Stage 3: gross/tax/net report)
-                 ▲                       │
-                 │                       └─▶ CALL "TAX-CALC" (in-process,
-                 │                            same executable — see below)
-                 └── COPY EMPLOYEE-RECORD.  (copybooks/employee-record.cpy,
-                      also COPYd into payroll-v1.cob and payroll-report.cob)
+        ├─▶ payroll-net.cob    ──▶ data/payroll-net-report.out  (Stage 3: gross/tax/net report)
+        │        ▲                       │
+        │        │                       └─▶ CALL "TAX-CALC" (in-process,
+        │        │                            same executable — see below)
+        │        └── COPY EMPLOYEE-RECORD.  (copybooks/employee-record.cpy,
+        │             also COPYd into payroll-v1.cob and payroll-report.cob)
+        │
+        └─▶ build-employee-index.cob ──▶ data/employees-indexed.dat (indexed master)
+                                                  │
+                                                  └─▶ payroll-indexed.cob ──▶ data/payroll-indexed-report.out
+                                                           │                  (Stage 4: gross/tax/net report,
+                                                           └─▶ CALL "TAX-CALC"  keyed random + sequential read)
 ```
 
-All three programs open `EMPLOYEE-FILE` read-only, loop record-by-record
-with a priming read + `PERFORM UNTIL` end-of-file, and open their own
-`REPORT-FILE` write-only/output. There is no shared runtime state between
-them — the only thing shared at compile time is the copybook text (and,
-for Stage 3, the `tax-calc.cob` source file linked into `payroll-net`'s
-executable).
+All programs open their input file read-only, loop record-by-record with a
+priming read + `PERFORM UNTIL` end-of-file (Stage 4 additionally does one
+keyed random read before that loop), and open their own `REPORT-FILE`
+write-only/output. There is no shared runtime state between them — the only
+thing shared at compile time is the copybook text (and, for Stages 3–4, the
+`tax-calc.cob` source file linked into each driver's executable).
 
 `payroll-net.cob` `CALL`s `tax-calc.cob` once per employee, passing gross
 pay in and receiving tax withheld and net pay back via `LINKAGE SECTION`
@@ -53,6 +61,15 @@ Both programs are compiled together in one `cobc -x` invocation
 (`src/payroll-net.cob src/tax-calc.cob`), which statically links the CALL
 target into a single executable — no dynamically-loaded `.so` module and
 no separate `tax-calc` binary.
+
+`payroll-indexed.cob` (Stage 4) `CALL`s the same `tax-calc.cob`, compiled
+together the same way (`src/payroll-indexed.cob src/tax-calc.cob`). Only
+`payroll-indexed.cob`'s input file organization differs from `payroll-net`'s
+— indexed instead of sequential; the subprogram contract is unchanged.
+`src/build-employee-index.cob` is a separate, standalone utility (its own
+`cobc -x` invocation, no `CALL`) that reads `data/employees.dat` and writes
+`data/employees-indexed.dat` — it has to run once, ahead of
+`payroll-indexed`, to produce the indexed file `payroll-indexed` reads.
 
 ## External integrations
 
@@ -74,9 +91,18 @@ compile-check gets added.
   Area A/B, sequence numbers in cols 1–6, indicator in col 7) for
   authenticity and portfolio value.
 - **`LINE SEQUENTIAL` file organization** for both input and output in
-  Stages 1–2 — plain text, one record per line, easy to inspect with
+  Stages 1–3 — plain text, one record per line, easy to inspect with
   ordinary text tools. Stage 4 deliberately switches the master file to
-  `INDEXED` to demonstrate the contrast.
+  `INDEXED` to demonstrate the contrast; report output stays `LINE
+  SEQUENTIAL` even in Stage 4, since the report is still meant to be
+  read top-to-bottom, not looked up by key.
+- **Indexed master file is generated, not checked in.** Unlike
+  `data/employees.dat` (plain fixed-width text, hand-written and
+  committed), `data/employees-indexed.dat` is a binary Berkeley DB btree
+  file produced by `build-employee-index.cob` from that same source data.
+  It's `.gitignore`d like a compiled executable and rebuilt locally rather
+  than tracked — its exact on-disk format is GnuCOBOL-version- and
+  platform-specific in a way plain text isn't.
 - **Copybook holds only the `01`-level record, not the `FD`.** The `FD
   EMPLOYEE-FILE.` line stays in each program (the file-name it's attached
   to is program-specific even when, as here, it happens to be the same
@@ -111,10 +137,6 @@ compile-check gets added.
   above.
 - **No CI.** Nothing currently runs `cobc` on push/PR to catch a broken
   compile automatically.
-- **Stage 4 is unstarted** — the tax brackets in `tax-calc.cob` are still
-  three hardcoded `IF`/`ELSE` comparisons, not a table. Stage 4 (indexed
-  file + table lookup) is explicitly optional/stretch; go/no-go decision
-  is the immediate next step (see roadmap).
 - **Fictional tax logic is a stated non-goal**, not a gap to close — the
   three brackets in `tax-calc.cob` (10%/15%/20%, thresholds chosen to
   exercise all three against the existing 4-employee sample data) do not
@@ -185,22 +207,34 @@ Demonstrates:
 documented calling convention (see
 [data-flow](#data-flow) above and STAGE-NOTES.md).
 
-### Stage 4 (optional/stretch) — Indexed file + table lookup (not started)
+### Stage 4 — Indexed file + table lookup ✅ done
 
-Convert the employee master file to indexed
-(`ORGANIZATION IS INDEXED`, keyed by employee ID). Add a tax-bracket table
-defined with OCCURS, populated at program start, looked up via SEARCH
-(or SEARCH ALL) instead of hardcoded IF/ELSE tax logic.
+`build-employee-index.cob` converts the employee master file to indexed
+(`ORGANIZATION IS INDEXED`, keyed by `EMP-ID`), writing
+`data/employees-indexed.dat` from `data/employees.dat`. `tax-calc.cob`'s
+hardcoded `IF`/`ELSE` tax brackets were replaced with an `OCCURS` table
+(`TAX-BRACKET-TABLE`, 3 rows) walked by `SEARCH` — same thresholds and
+rates as Stage 3, so `payroll-net`'s output is byte-identical before and
+after. `payroll-indexed.cob`, a new driver, reads the indexed file with
+`ACCESS MODE IS DYNAMIC`: one random `READ ... KEY IS` lookup (a specific
+employee, by ID, without scanning from the top), then a `START` +
+sequential `READ NEXT` pass that visits every record in key order to build
+the same style of gross/tax/net report Stage 3 produces.
 
 Demonstrates:
 
 - Indexed file organization (vs. sequential)
 - OCCURS clause for table definitions
-- SEARCH / SEARCH ALL
-- START/random access READ by key
+- SEARCH (linear scan over an ordered-by-position table; SEARCH ALL was
+  considered but doesn't fit — see STAGE-NOTES.md for why)
+- START / random access READ by key, and READ NEXT for sequential access
+  on the same file
+- Migrating a subprogram's internal logic (IF/ELSE → table) without
+  changing its external contract or output
 
-**Deliverable**: converted master file, updated tax-calc logic using table
-lookup, migration notes (why indexed vs. sequential).
+**Deliverable**: `build-employee-index.cob` (conversion utility),
+`payroll-indexed.cob` (driver), updated `tax-calc.cob` (table lookup),
+migration notes (see [STAGE-NOTES.md](STAGE-NOTES.md#stage-4--indexed-file--table-lookup)).
 
 ### Format decision
 

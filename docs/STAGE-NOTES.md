@@ -144,6 +144,77 @@ stage lands.
   src/tax-calc.cob` — zero warnings with `-Wall`. Run as `./payroll-net`
   from the repo root (relative `ASSIGN` paths, same as Stages 1–2).
 
-## Stage 4 — Indexed file + table lookup (stretch)
+## Stage 4 — Indexed file + table lookup
 
-_(not started)_
+- `src/build-employee-index.cob` is a one-time conversion utility: reads
+  `data/employees.dat` (`LINE SEQUENTIAL`) and writes
+  `data/employees-indexed.dat` (`ORGANIZATION IS INDEXED`, `RECORD KEY IS
+  IDX-EMP-ID`). It needs the shared `EMPLOYEE-RECORD` copybook attached to
+  two different `FD`s in the same program (source and destination), which
+  COBOL can't do with duplicate field names — solved with `COPY
+  EMPLOYEE-RECORD REPLACING`, renaming every field (`EMP-ID` →
+  `IDX-EMP-ID`, etc.) for the second `FD` so both coexist without a
+  naming collision.
+- The generated indexed file is a binary Berkeley DB btree file (`file
+  data/employees-indexed.dat` confirms this on GnuCOBOL 3.2.0/macOS) —
+  unlike every other sample file in this project, it isn't meaningfully
+  diffable or human-readable, so it's `.gitignore`d and regenerated
+  locally (`./build-employee-index`) rather than checked in, same
+  treatment as compiled executables.
+- `src/payroll-indexed.cob` opens the indexed file with `ACCESS MODE IS
+  DYNAMIC`, which allows both access styles used in this one program:
+  a random `READ ... KEY IS EMP-ID` (looks up employee 1003 directly, no
+  scan) and, separately, `START ... KEY IS NOT LESS THAN EMP-ID` followed
+  by repeated `READ ... NEXT RECORD` (walks every record in key order,
+  same shape as Stage 1–3's priming-read + `PERFORM UNTIL` loop, just
+  keyed instead of purely sequential).
+  - `MOVE ZEROS TO EMP-ID` before the `START` is necessary: `EMP-ID` is a
+    numeric field, and after the random lookup it's left holding
+    `1003`, not the table's lowest key. Without resetting it first, the
+    sequential pass would start from `1003` and only reach 1003/1004,
+    silently skipping 1001/1002 — GnuCOBOL doesn't reset it back to a
+    "start of file" state automatically.
+  - `MOVE LOW-VALUES TO EMP-ID` was tried first (mirroring a pattern seen
+    in general COBOL references) but GnuCOBOL flags it `-Warchaic` for a
+    numeric item; `MOVE ZEROS` is the correct idiom here since `EMP-ID`
+    is `PIC 9(4)`, not alphanumeric.
+- `tax-calc.cob`'s tax-bracket lookup was rewritten from Stage 3's
+  hardcoded `IF`/`ELSE` to an `OCCURS 3 TIMES` table (`TAX-BRACKET-TABLE`,
+  `INDEXED BY TB-IDX`) walked with `SEARCH`. Same three brackets, same
+  thresholds/rates (`<= 850.00` → 10%, `<= 1050.00` → 15%, else → 20%) —
+  row 3's threshold is `99999.99` (the field's max value), acting as an
+  "or higher" sentinel for the `ELSE` case. Verified behavior-preserving
+  by recompiling `payroll-net` (Stage 3's driver, unchanged, still `CALL`s
+  `TAX-CALC`) and byte-diffing `data/payroll-net-report.out` before and
+  after — identical.
+  - **`SEARCH`, not `SEARCH ALL`.** `SEARCH ALL` binary-searches for a row
+    matching a search key by *equality*; this lookup needs "the first row
+    whose threshold is `>=` gross pay," a range test, not an equality
+    match — `SEARCH`'s linear scan is the right tool, mirroring how the
+    `IF`/`ELSE` it replaced would fall through to the first true
+    condition.
+  - **Bug caught before merge: forgot to reset `TB-IDX` between calls.**
+    `TAX-BRACKET-TABLE` and its index live in `WORKING-STORAGE`, which
+    persists across `CALL`s within one run of `payroll-net`/
+    `payroll-indexed` — `SEARCH` resumes scanning from `TB-IDX`'s
+    *current* value, not row 1, unless told otherwise. Without `SET
+    TB-IDX TO 1` immediately before each `SEARCH`, the second employee's
+    lookup started wherever the first employee's search left off (often
+    row 3, the sentinel), so every employee after the first got taxed at
+    20% regardless of actual bracket. Caught by the before/after byte-diff
+    above, which failed loudly (wrong totals) until the `SET` was added.
+- Both `build-employee-index` and `payroll-indexed` needed line-wrapped
+  `SELECT ... ASSIGN TO "data/employees-indexed.dat"` clauses (`ASSIGN TO`
+  on its own continuation line) — fixed-format COBOL's Area B ends at
+  column 72, and `SELECT EMPLOYEE-INDEXED-FILE ASSIGN TO
+  "data/employees-indexed.dat"` on one line runs past it, producing a
+  confusing cascade of "continuation character expected" / "missing file
+  description" errors rather than a clear line-length complaint.
+- Compile: `cobc -x -I copybooks -o build-employee-index
+  src/build-employee-index.cob`, then `./build-employee-index` once to
+  produce `data/employees-indexed.dat`; then `cobc -x -I copybooks -o
+  payroll-indexed src/payroll-indexed.cob src/tax-calc.cob` and
+  `./payroll-indexed` — zero warnings with `-Wall` on both. Run from the
+  repo root (relative `ASSIGN` paths, same as Stages 1–3). Output
+  (`data/payroll-indexed-report.out`) matches Stage 3's totals exactly:
+  tax withheld `597.05`, net pay `3,274.45`.

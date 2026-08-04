@@ -8,8 +8,14 @@
 payroll-v1
 payroll-report
 payroll-net
+payroll-indexed
+build-employee-index
 tax-calc
 hello
+
+# Generated indexed master file (binary, GnuCOBOL/platform-specific) -
+# rebuild with build-employee-index; see README Stage 4 instructions.
+data/employees-indexed.dat
 
 # macOS
 .DS_Store

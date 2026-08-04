@@ -1,0 +1,14 @@
+PAYROLL REPORT - STAGE 4 (INDEXED)
+======================================
+  RANDOM LOOKUP (ID 1003):  CAROL CHEN              832.50
+======================================
+    ID  NAME                   HOURS    RATE     GROSS       TAX       NET
+  1001  ALICE ANDERSON         40.00   25.00  1,000.00    150.00    850.00
+  1002  BOB BAKER              38.00   30.50  1,159.00    231.80    927.20
+  1003  CAROL CHEN             45.00   18.50    832.50     83.25    749.25
+  1004  DAVID DIAZ             40.00   22.00    880.00    132.00    748.00
+======================================
+  TOTAL GROSS PAY:      3,871.50
+  TOTAL TAX WITHHELD:     597.05
+  TOTAL NET PAY:        3,274.45
+  EMPLOYEE COUNT:        4
